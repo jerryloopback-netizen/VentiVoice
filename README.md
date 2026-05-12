@@ -1,6 +1,28 @@
 # VentiVoice
 
-热键驱动的语音转写 + LLM 润色桌面工具。按住热键说话，松开即得到经过 AI 润色的文本并自动复制到剪贴板。
+一个运行在本地的语音转文字桌面工具，专为中文场景优化。
+
+在日常工作中，打字往往是思考到输出之间最大的瓶颈——你脑子里已经想好了要写什么，但手指跟不上。VentiVoice 让你按下热键直接说话，松开后几秒内就能得到一段经过 AI 润色的书面文本，自动复制到剪贴板，直接粘贴到任何地方。
+
+核心流程：**热键录音 → 本地 ASR 转写 → LLM 润色 → 剪贴板输出**。ASR 完全在本地运行（无需联网），LLM 润色通过 API 调用（支持任意 OpenAI 兼容接口）。整个流程通常在 3-5 秒内完成，适合写消息、记笔记、写邮件、口述文档等场景。
+
+## 为什么选择这些 ASR 模型
+
+本项目在开发过程中测试了多种 ASR 方案，包括口碑极好的 Whisper 系列（tiny / large-v3-turbo / large-v3）。但实测发现，Whisper 在个人电脑本地部署、面对中文语音时存在明显问题：
+
+- **中文识别准确率不理想**：Whisper 是多语言通用模型，中文并非其强项，尤其在口语化、带方言色彩的日常表达中错误率较高
+- **推理速度慢**：large-v3 在无 GPU 加速时转写 5 秒音频需要 10-30 秒，即使有 Vulkan 加速也远不如专用中文模型
+- **部署复杂**：需要编译 whisper.cpp、配置 Vulkan SDK、处理 DLL 依赖，门槛较高
+
+最终选定的 3 个模型均基于 sherpa-onnx 运行时，开箱即用：
+
+| 模型 | 参数量 | 特点 | 适用场景 |
+|------|--------|------|----------|
+| **SenseVoice-Small** | 234M | 非自回归，极快（5 秒音频 < 0.5s），中/英/日/韩/粤 | 日常使用首选，速度优先 |
+| **SenseVoice-Large** | ~1.6B | 自回归，更高准确率（AISHELL-1 CER 2.09%），50+ 语言 | 需要更高精度时切换 |
+| **Paraformer-Large** | ~220M | 阿里达摩院中文专用模型，非自回归 | 纯中文场景的备选方案 |
+
+三者均使用 int8 量化，单个模型约 220-230MB，总共约 700MB，对磁盘和内存友好。
 
 ## 功能
 
@@ -22,7 +44,7 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/your-username/VentiVoice.git
+git clone https://github.com/jerryloopback-netizen/VentiVoice.git
 cd VentiVoice
 ```
 
@@ -89,9 +111,9 @@ python src/main.py
 
 | 热键 | 功能 |
 |------|------|
-| Alt+Shift+! | 档位一: Clean（最低限度清理） |
-| Alt+Shift | 档位二: Refine（书面化整理） |
-| Alt+Shift+@ | 档位三: Rewrite（理解重写） |
+| Alt+Shift+1 (!) | 档位一: Clean（最低限度清理） |
+| Alt+Shift+2 (@) | 档位二: Refine（书面化整理） |
+| Alt+Shift+3 (#) | 档位三: Rewrite（理解重写） |
 | Escape | 取消当前操作 |
 
 热键可在界面内自定义修改。

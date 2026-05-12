@@ -1,7 +1,7 @@
 hotkeys:
   tier1: alt+shift+!
-  tier2: alt+shift
-  tier3: alt+shift+@
+  tier2: alt+shift+@
+  tier3: alt+shift+#
   cancel: escape
   mode: toggle
 recording:
