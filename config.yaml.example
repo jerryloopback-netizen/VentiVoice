@@ -1,0 +1,50 @@
+hotkeys:
+  tier1: alt+shift+!
+  tier2: alt+shift
+  tier3: alt+shift+@
+  cancel: escape
+  mode: toggle
+recording:
+  sample_rate: 16000
+  channels: 1
+  device: null
+asr:
+  default_engine: sherpa_onnx
+  default_model: sensevoice-small
+  sherpa_onnx:
+    models:
+      sensevoice-small:
+        type: sense_voice
+        model_path: ./models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx
+        tokens_path: ./models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt
+        use_itn: true
+        language: zh
+      sensevoice-large:
+        type: sense_voice
+        model_path: ./models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09/model.int8.onnx
+        tokens_path: ./models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09/tokens.txt
+        use_itn: true
+        language: zh
+      paraformer-large:
+        type: paraformer
+        model_path: ./models/sherpa-onnx-paraformer-zh-2024-03-09/model.int8.onnx
+        tokens_path: ./models/sherpa-onnx-paraformer-zh-2024-03-09/tokens.txt
+        language: zh
+llm:
+  default_provider: my-provider
+  providers:
+    my-provider:
+      base_url: https://api.openai.com/v1
+      api_key: sk-your-api-key-here
+      model: gpt-4o-mini
+      max_tokens: 2048
+      temperature: 0.3
+corpus:
+  path: ./corpus/corrections.json
+ui:
+  always_on_top: true
+  auto_paste: false
+  default_tier: 1
+  theme: dark
+  last_asr_model: sensevoice-small
+  last_llm_provider: my-provider
