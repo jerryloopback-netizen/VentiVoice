@@ -1,4 +1,10 @@
 {
-  "corrections": [],
+  "corrections": [
+    {
+      "correct": "温迪",
+      "wrong_variants": ["问题", "闻笛", "温蒂"],
+      "count": 5
+    }
+  ],
   "domain_terms": []
 }

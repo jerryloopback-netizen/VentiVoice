@@ -6,6 +6,8 @@ config.yaml
 
 # Personal corpus data
 corpus/corrections.json
+corpus/blacklist.json
+corpus/last_result.txt
 
 # Python cache
 __pycache__/
