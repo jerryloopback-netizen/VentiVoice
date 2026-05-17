@@ -61,7 +61,7 @@ VentiVoice 拥有一套完整的个人词库系统，能够随着使用不断学
 - Windows 10/11
 - 麦克风
 
-### 1. 克隆仓库
+### 1. 克隆仓库或下载release中源码
 
 ```bash
 git clone https://github.com/jerryloopback-netizen/VentiVoice.git
