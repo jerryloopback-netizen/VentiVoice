@@ -19,7 +19,7 @@
 | 模型 | 参数量 | 特点 | 适用场景 |
 |------|--------|------|----------|
 | **SenseVoice-Small** | 234M | 非自回归，极快（5 秒音频 < 0.5s），中/英/日/韩/粤 | 日常使用首选，速度优先 |
-| **SenseVoice-Large** | ~1.6B | 自回归，更高准确率（AISHELL-1 CER 2.09%），50+ 语言 | 需要更高精度时切换 |
+| **SenseVoice-2025** (`sensevoice-large`) | ~234M | 2025-09-09 int8 版本，基于 2024-07-17 版本微调，中/粤/英/日/韩；官方说明不支持标点 | 需要新版 SenseVoice 或粤语表现时切换 |
 | **Paraformer-Large** | ~220M | 阿里达摩院中文专用模型，非自回归 | 纯中文场景的备选方案 |
 
 三者均使用 int8 量化，单个模型约 220-230MB，总共约 700MB，对磁盘和内存友好。
@@ -30,7 +30,7 @@
 
 - 全局热键录音（push-to-talk 或 toggle 模式）
 - 三档 LLM 润色：Clean（最低限度清理）/ Refine（书面化整理）/ Rewrite（理解重写）
-- 多 ASR 模型切换：SenseVoice-Small / SenseVoice-Large / Paraformer-Large
+- 多 ASR 模型切换：SenseVoice-Small / SenseVoice-2025 (`sensevoice-large`) / Paraformer-Large
 - 多 LLM 配置管理：支持任意 OpenAI 兼容 API，可在界面内新建/编辑/测试
 
 ### 个人词库系统
@@ -61,43 +61,87 @@ VentiVoice 拥有一套完整的个人词库系统，能够随着使用不断学
 - Windows 10/11
 - 麦克风
 
-### 1. 克隆仓库或下载release中源码
+### 1. 克隆仓库或下载 release 源码
 
-```bash
+```bat
 git clone https://github.com/jerryloopback-netizen/VentiVoice.git
 cd VentiVoice
 ```
 
-### 2. 安装依赖
+### 2. 创建虚拟环境并安装依赖
 
-```bash
-pip install -r requirements.txt
+在 Windows `cmd.exe` 中运行：
+
+```bat
+py -3.10 -m venv .venv
+.venv\Scripts\activate
+python -m pip install -U pip
+python -m pip install -r requirements.txt
+```
+
+如果你使用 PowerShell：
+
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+python -m pip install -r requirements.txt
 ```
 
 ### 3. 下载 ASR 模型
 
-模型文件较大（约 700MB），不包含在仓库中，需单独下载：
+模型文件较大，不包含在仓库中。默认只下载日常推荐的 `sensevoice-small`（约 230MB），不是一次下载全部模型：
 
-```bash
-bash scripts/download_models.sh
+```bat
+python scripts\download_models.py
 ```
+
+下载其他模型：
+
+```bat
+python scripts\download_models.py --model paraformer-large
+python scripts\download_models.py --model sensevoice-large
+python scripts\download_models.py --all
+```
+
+也可以先不下载其他模型。程序启动后，ASR 模型下拉框会标出未下载模型；选择未下载模型时，会提示是否立即下载，下载完成后自动切换。
+
+下载脚本支持简单的下载源选择：
+
+```bat
+python scripts\download_models.py --model sensevoice-large --source auto
+python scripts\download_models.py --model sensevoice-large --source hf-mirror
+python scripts\download_models.py --model sensevoice-small --source official
+```
+
+`auto` 会对同一文件的可用源做一次轻量测速，然后选择较快的源。当前三个模型都配置了 Hugging Face 官方源和 `hf-mirror.com` 备用源。
 
 如果网络不佳，也可以手动下载模型并放入 `models/` 目录：
 
-| 模型 | 来源 | 目录名 |
-|------|------|--------|
-| SenseVoice-Small | [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/` |
-| SenseVoice-Large | [HuggingFace](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09) | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09/` |
-| Paraformer-Large | [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) | `sherpa-onnx-paraformer-zh-2024-03-09/` |
+| 模型 | 官方源 | 备用源 | 目录名 |
+|------|--------|--------|--------|
+| SenseVoice-Small | [Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17) | [hf-mirror](https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17) | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/` |
+| SenseVoice-2025 (`sensevoice-large`) | [Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09) | [hf-mirror](https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09) | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09/` |
+| Paraformer-Large | [Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-2024-03-09) | [hf-mirror](https://hf-mirror.com/csukuangfj/sherpa-onnx-paraformer-zh-2024-03-09) | `sherpa-onnx-paraformer-zh-2024-03-09/` |
 
 每个模型目录下至少需要 `model.int8.onnx` 和 `tokens.txt` 两个文件。
+
+版本说明：参考 Sherpa-ONNX 的 [SenseVoice 官方文档](https://github.com/k2-fsa/sherpa/blob/master/docs/source/onnx/sense-voice/pretrained.rst) 和 [Paraformer 官方文档](https://github.com/k2-fsa/sherpa/blob/master/docs/source/onnx/pretrained_models/offline-paraformer/paraformer-models.rst)。当前 SenseVoice 新版本为 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`；`sensevoice-small` 仍使用 2024-07-17 版本作为默认速度优先模型。Paraformer 标准中英文模型仍使用 `sherpa-onnx-paraformer-zh-2024-03-09`；官方文档另有更新的方言微调模型，但不是本项目当前默认 Paraformer 的直接替代。
 
 ### 4. 配置 LLM API
 
 复制配置模板并填入你的 API 信息：
 
-```bash
-cp config.yaml.example config.yaml
+在 Windows `cmd.exe` 中运行：
+
+```bat
+copy config.yaml.example config.yaml
+```
+
+在 PowerShell 中运行：
+
+```powershell
+Copy-Item config.yaml.example config.yaml
 ```
 
 编辑 `config.yaml`，将 `api_key` 替换为你的实际密钥。支持任何 OpenAI 兼容接口（OpenAI、DeepSeek、本地 LM Studio 等）。
@@ -108,17 +152,19 @@ cp config.yaml.example config.yaml
 
 ### 5. 验证 ASR（可选）
 
-```bash
-bash scripts/verify_asr.sh
+```bat
+python src\verify_pipeline.py --no-llm
 ```
 
 ### 6. 运行
 
-```bash
-python src/main.py
+```bat
+python src\main.py
 ```
 
 或双击运行 `create_shortcut.bat` 生成桌面快捷方式后使用。
+
+> 旧的 `scripts/download_models.sh` 和 `scripts/verify_asr.sh` 仍保留给 Git Bash / WSL / Linux 用户。普通 Windows 部署不需要安装 WSL，也不需要运行 `bash`。
 
 ## 使用方法
 

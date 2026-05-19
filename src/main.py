@@ -10,10 +10,11 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, messagebox
 from pathlib import Path
 from typing import Optional
 
@@ -37,8 +38,8 @@ class VentiVoiceApp:
             sample_rate=self.config["recording"]["sample_rate"],
             device=self.config["recording"].get("device"),
         )
-        _project_root = Path(__file__).parent.parent
-        corpus_path = _project_root / self.config["corpus"]["path"]
+        self._project_root = Path(__file__).parent.parent
+        corpus_path = self._project_root / self.config["corpus"]["path"]
         corpus_enabled = self.config["corpus"].get("enabled", True)
         self.corpus = Corpus(str(corpus_path), enabled=corpus_enabled)
 
@@ -55,6 +56,7 @@ class VentiVoiceApp:
         self._llm: Optional[LLMProcessor] = None
         self._recording = False
         self._processing = False
+        self._downloading_model = False
 
         self._last_result_path = Path(__file__).parent.parent / "corpus" / "last_result.txt"
         self._prev_result: str = self._load_last_result()
@@ -63,6 +65,8 @@ class VentiVoiceApp:
         self._load_engine()
         self._try_load_llm()
         self._build_ui()
+        if not self._is_model_installed(self._current_model_name):
+            self.root.after(500, self._prompt_download_model, self._current_model_name)
         self._bind_hotkeys()
         self._setup_tray()
 
@@ -70,9 +74,14 @@ class VentiVoiceApp:
 
     def _load_engine(self):
         try:
+            if not self._is_model_installed(self._current_model_name):
+                self._engine = None
+                self._set_status(f"ASR 模型未下载: {self._current_model_name}")
+                return
             self._engine = build_engine(self.config, self._current_model_name)
             self._set_status(f"ASR 就绪: {self._current_model_name}")
         except Exception as e:
+            self._engine = None
             self._set_status(f"ASR 加载失败: {e}")
 
     def _try_load_llm(self):
@@ -84,9 +93,13 @@ class VentiVoiceApp:
     def _switch_model(self, model_name: str):
         if model_name == self._current_model_name and self._engine:
             return
+        if not self._is_model_installed(model_name):
+            self._prompt_download_model(model_name)
+            return
         self._current_model_name = model_name
         self.config["ui"]["last_asr_model"] = model_name
         save_config(self.config)
+        self._refresh_model_combo(model_name)
         self._set_status(f"切换模型: {model_name}...")
         threading.Thread(target=self._load_engine, daemon=True).start()
 
@@ -209,12 +222,13 @@ class VentiVoiceApp:
 
         ttk.Label(top, text="ASR 模型:", style="Dark.TLabel").pack(side=tk.LEFT)
 
-        model_names = self._get_model_names()
-        self._model_var = tk.StringVar(value=self._current_model_name)
-        model_combo = ttk.Combobox(top, textvariable=self._model_var, values=model_names,
-                                   state="readonly", width=20)
-        model_combo.pack(side=tk.LEFT, padx=(4, 12))
-        model_combo.bind("<<ComboboxSelected>>", lambda e: self._switch_model(self._model_var.get()))
+        self._model_display_to_name: dict[str, str] = {}
+        model_choices = self._get_model_choices()
+        self._model_var = tk.StringVar(value=self._model_name_to_display(self._current_model_name))
+        self._model_combo = ttk.Combobox(top, textvariable=self._model_var, values=model_choices,
+                                         state="readonly", width=28)
+        self._model_combo.pack(side=tk.LEFT, padx=(4, 12))
+        self._model_combo.bind("<<ComboboxSelected>>", self._on_model_combo_change)
 
         self._recording_indicator = tk.Canvas(top, width=16, height=16, bg="#1e1e1e", highlightthickness=0)
         self._recording_indicator.pack(side=tk.RIGHT)
@@ -442,6 +456,90 @@ class VentiVoiceApp:
     def _get_model_names(self) -> list[str]:
         sherpa = self.config["asr"].get("sherpa_onnx", {}).get("models", {})
         return list(sherpa.keys())
+
+    def _get_model_choices(self) -> list[str]:
+        self._model_display_to_name = {}
+        choices = []
+        for name in self._get_model_names():
+            display = self._model_name_to_display(name)
+            self._model_display_to_name[display] = name
+            choices.append(display)
+        return choices
+
+    def _model_name_to_display(self, model_name: str) -> str:
+        if self._is_model_installed(model_name):
+            return model_name
+        return f"{model_name}（未下载）"
+
+    def _refresh_model_combo(self, selected_model: str | None = None):
+        choices = self._get_model_choices()
+        self._model_combo["values"] = choices
+        if selected_model:
+            self._model_var.set(self._model_name_to_display(selected_model))
+
+    def _on_model_combo_change(self, event=None):
+        display = self._model_var.get()
+        model_name = self._model_display_to_name.get(display, display.replace("（未下载）", ""))
+        self._switch_model(model_name)
+
+    def _resolve_project_path(self, path_text: str) -> Path:
+        path = Path(path_text)
+        if not path.is_absolute():
+            path = self._project_root / path
+        return path
+
+    def _is_model_installed(self, model_name: str) -> bool:
+        models = self.config["asr"].get("sherpa_onnx", {}).get("models", {})
+        model = models.get(model_name)
+        if not model:
+            return False
+        required = (model.get("model_path"), model.get("tokens_path"))
+        return all(path and self._resolve_project_path(path).is_file() for path in required)
+
+    def _prompt_download_model(self, model_name: str):
+        self._refresh_model_combo(self._current_model_name)
+        if self._downloading_model:
+            self._set_status("已有模型正在下载，请稍候")
+            return
+
+        should_download = messagebox.askyesno(
+            "下载 ASR 模型",
+            f"模型 {model_name} 尚未下载。\n\n是否现在下载？下载完成后会自动切换到该模型。",
+        )
+        if not should_download:
+            return
+
+        self._downloading_model = True
+        self._set_status(f"正在下载模型: {model_name}...")
+        threading.Thread(target=self._download_model, args=(model_name,), daemon=True).start()
+
+    def _download_model(self, model_name: str):
+        script = self._project_root / "scripts" / "download_models.py"
+        try:
+            result = subprocess.run(
+                [sys.executable, str(script), "--model", model_name],
+                cwd=str(self._project_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout).strip().splitlines()
+                message = detail[-1] if detail else "未知错误"
+                self._set_status(f"模型下载失败: {message}")
+                return
+
+            self._current_model_name = model_name
+            self.config["ui"]["last_asr_model"] = model_name
+            save_config(self.config)
+            self.root.after(0, self._refresh_model_combo, model_name)
+            self._set_status(f"模型下载完成，正在加载: {model_name}...")
+            self._load_engine()
+        except Exception as e:
+            self._set_status(f"模型下载失败: {e}")
+        finally:
+            self._downloading_model = False
 
     def _set_tier(self, tier: Tier):
         self._current_tier = tier
