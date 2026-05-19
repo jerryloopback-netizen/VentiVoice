@@ -79,6 +79,15 @@ python -m pip install -U pip
 python -m pip install -r requirements.txt
 ```
 
+如果你不想手动输入这些步骤，推荐直接双击仓库根目录的 `install.bat`。它会自动完成：
+
+- 创建 `.venv`
+- 安装 Python 依赖
+- 复制 `config.yaml`
+- 选择并下载模型
+- 生成 `run.bat`、`run_debug.bat`
+- 可选创建桌面快捷方式
+
 如果你使用 PowerShell：
 
 ```powershell
@@ -162,7 +171,20 @@ python src\verify_pipeline.py --no-llm
 python src\main.py
 ```
 
-或双击运行 `create_shortcut.bat` 生成桌面快捷方式后使用。
+也可以直接双击 `run.bat`，或运行 `install.bat` 后使用生成的桌面快捷方式。
+
+### 卸载
+
+如果要移除这套 Windows 部署生成的内容，双击 `uninstall.bat`。它会删除：
+
+- `.venv`
+- `models`
+- `config.yaml`
+- `corpus\corrections.json`
+- `corpus\blacklist.json`
+- `corpus\last_result.txt`
+- `run.bat`、`run_debug.bat`
+- 本地和桌面快捷方式
 
 > 旧的 `scripts/download_models.sh` 和 `scripts/verify_asr.sh` 仍保留给 Git Bash / WSL / Linux 用户。普通 Windows 部署不需要安装 WSL，也不需要运行 `bash`。
 
