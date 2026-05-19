@@ -47,11 +47,8 @@ VentiVoice 拥有一套完整的个人词库系统，能够随着使用不断学
 ### 界面与体验
 
 - 自定义窗口图标
-- 系统托盘常驻，深色主题 UI
 - 纠错面板：提交错误词→正确词，自动替换当前文本并复制到剪贴板
-- 上次结果：防止误触热键覆盖剪贴板，可随时找回上一次转写结果（跨程序重启持久化）
-- 热键设置面板：可折叠，按需展开
-- 词库发现提示栏：自动发现新词时在独立状态行显示
+- 上次结果：防止误触热键覆盖剪贴板，可随时找回上一次转写结果
 
 ## 快速开始
 
@@ -61,14 +58,48 @@ VentiVoice 拥有一套完整的个人词库系统，能够随着使用不断学
 - Windows 10/11
 - 麦克风
 
-### 1. 克隆仓库或下载 release 源码
+### 自动部署（推荐）
+
+克隆仓库或下载 release 源码后，在项目根目录双击运行：
+
+```bat
+install.bat
+```
+
+安装脚本会自动完成：
+
+- 创建 `.venv`
+- 安装 Python 依赖
+- 初始化 `config.yaml`
+- 选择并下载 ASR 模型
+- 可选写入初始 LLM API 配置
+- 生成 `run.bat`、`run_debug.bat`
+- 可选创建桌面快捷方式
+
+部署完成后，双击运行：
+
+```bat
+run.bat
+```
+
+如果启动失败，用下面的调试入口查看错误：
+
+```bat
+run_debug.bat
+```
+
+### 手动部署
+
+如果你需要手动部署、排错或参与开发，可以按下面步骤执行。
+
+#### 1. 获取源码
 
 ```bat
 git clone https://github.com/jerryloopback-netizen/VentiVoice.git
 cd VentiVoice
 ```
 
-### 2. 创建虚拟环境并安装依赖
+#### 2. 创建虚拟环境并安装依赖
 
 在 Windows `cmd.exe` 中运行：
 
@@ -79,15 +110,6 @@ python -m pip install -U pip
 python -m pip install -r requirements.txt
 ```
 
-如果你不想手动输入这些步骤，推荐直接双击仓库根目录的 `install.bat`。它会自动完成：
-
-- 创建 `.venv`
-- 安装 Python 依赖
-- 复制 `config.yaml`
-- 选择并下载模型
-- 生成 `run.bat`、`run_debug.bat`
-- 可选创建桌面快捷方式
-
 如果你使用 PowerShell：
 
 ```powershell
@@ -97,49 +119,7 @@ python -m pip install -U pip
 python -m pip install -r requirements.txt
 ```
 
-### 3. 下载 ASR 模型
-
-模型文件较大，不包含在仓库中。默认只下载日常推荐的 `sensevoice-small`（约 230MB），不是一次下载全部模型：
-
-```bat
-python scripts\download_models.py
-```
-
-下载其他模型：
-
-```bat
-python scripts\download_models.py --model paraformer-large
-python scripts\download_models.py --model sensevoice-large
-python scripts\download_models.py --all
-```
-
-也可以先不下载其他模型。程序启动后，ASR 模型下拉框会标出未下载模型；选择未下载模型时，会提示是否立即下载，下载完成后自动切换。
-
-下载脚本支持简单的下载源选择：
-
-```bat
-python scripts\download_models.py --model sensevoice-large --source auto
-python scripts\download_models.py --model sensevoice-large --source hf-mirror
-python scripts\download_models.py --model sensevoice-small --source official
-```
-
-`auto` 会对同一文件的可用源做一次轻量测速，然后选择较快的源。当前三个模型都配置了 Hugging Face 官方源和 `hf-mirror.com` 备用源。
-
-如果网络不佳，也可以手动下载模型并放入 `models/` 目录：
-
-| 模型 | 官方源 | 备用源 | 目录名 |
-|------|--------|--------|--------|
-| SenseVoice-Small | [Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17) | [hf-mirror](https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17) | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/` |
-| SenseVoice-2025 (`sensevoice-large`) | [Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09) | [hf-mirror](https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09) | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09/` |
-| Paraformer-Large | [Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-2024-03-09) | [hf-mirror](https://hf-mirror.com/csukuangfj/sherpa-onnx-paraformer-zh-2024-03-09) | `sherpa-onnx-paraformer-zh-2024-03-09/` |
-
-每个模型目录下至少需要 `model.int8.onnx` 和 `tokens.txt` 两个文件。
-
-版本说明：参考 Sherpa-ONNX 的 [SenseVoice 官方文档](https://github.com/k2-fsa/sherpa/blob/master/docs/source/onnx/sense-voice/pretrained.rst) 和 [Paraformer 官方文档](https://github.com/k2-fsa/sherpa/blob/master/docs/source/onnx/pretrained_models/offline-paraformer/paraformer-models.rst)。当前 SenseVoice 新版本为 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09`；`sensevoice-small` 仍使用 2024-07-17 版本作为默认速度优先模型。Paraformer 标准中英文模型仍使用 `sherpa-onnx-paraformer-zh-2024-03-09`；官方文档另有更新的方言微调模型，但不是本项目当前默认 Paraformer 的直接替代。
-
-### 4. 配置 LLM API
-
-复制配置模板并填入你的 API 信息：
+#### 3. 初始化配置
 
 在 Windows `cmd.exe` 中运行：
 
@@ -153,29 +133,54 @@ copy config.yaml.example config.yaml
 Copy-Item config.yaml.example config.yaml
 ```
 
-编辑 `config.yaml`，将 `api_key` 替换为你的实际密钥。支持任何 OpenAI 兼容接口（OpenAI、DeepSeek、本地 LM Studio 等）。
+编辑 `config.yaml`，将 `api_key` 替换为你的实际密钥。支持任何 OpenAI 兼容接口（OpenAI、DeepSeek、本地 LM Studio 等）。也可以启动程序后在界面内管理 LLM 配置。
 
-也可以启动程序后在界面内管理 LLM 配置。这里，推荐OpenAI的gpt-5.4-mini，具有高速响应和不错的智能。这个模型的API在不少第三方转发站点成本几乎没有。
+#### 4. 下载 ASR 模型
 
-若没有第三方OpenAI compatible API申请经历，可以尝试 coderelay.cn 的 gpt-5.4-mini。仅作参考不做任何推荐。
+默认只下载日常推荐的 `sensevoice-small`：
 
-### 5. 验证 ASR（可选）
+```bat
+python scripts\download_models.py
+```
+
+下载其他模型：
+
+```bat
+python scripts\download_models.py --model paraformer-large
+python scripts\download_models.py --model sensevoice-large
+python scripts\download_models.py --all
+```
+
+指定下载源：
+
+```bat
+python scripts\download_models.py --model sensevoice-small --source official
+python scripts\download_models.py --model sensevoice-small --source hf-mirror
+```
+
+`auto` 是默认下载源策略，会在官方源和镜像源之间做简单选择。
+
+#### 5. 验证 ASR（可选）
 
 ```bat
 python src\verify_pipeline.py --no-llm
 ```
 
-### 6. 运行
+#### 6. 运行
 
 ```bat
 python src\main.py
 ```
 
-也可以直接双击 `run.bat`，或运行 `install.bat` 后使用生成的桌面快捷方式。
-
 ### 卸载
 
-如果要移除这套 Windows 部署生成的内容，双击 `uninstall.bat`。它会删除：
+如果要移除自动部署或运行生成的内容，双击：
+
+```bat
+uninstall.bat
+```
+
+它会删除：
 
 - `.venv`
 - `models`
