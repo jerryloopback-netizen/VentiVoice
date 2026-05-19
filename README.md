@@ -54,7 +54,7 @@ VentiVoice 拥有一套完整的个人词库系统，能够随着使用不断学
 
 ### 环境要求
 
-- Python 3.10+
+- Python 3.11-3.14
 - Windows 10/11
 - 麦克风
 
@@ -71,10 +71,13 @@ install.bat
 - 创建 `.venv`
 - 安装 Python 依赖
 - 初始化 `config.yaml`
+- 如有旧配置，安装器会引导你手动替换并导入 API / 词库
 - 选择并下载 ASR 模型
 - 可选写入初始 LLM API 配置
 - 生成 `run.bat`、`run_debug.bat`
 - 可选创建桌面快捷方式
+
+安装器会在本机 Python 3.11-3.14 中选择包含预编译 NumPy 2.4 wheel 和 sherpa-onnx wheel 的最高可用版本。
 
 部署完成后，双击运行：
 
@@ -104,19 +107,19 @@ cd VentiVoice
 在 Windows `cmd.exe` 中运行：
 
 ```bat
-py -3.10 -m venv .venv
+py -3.14 -m venv .venv
 .venv\Scripts\activate
 python -m pip install -U pip
-python -m pip install -r requirements.txt
+python -m pip install --only-binary=:all: -r requirements.txt
 ```
 
 如果你使用 PowerShell：
 
 ```powershell
-py -3.10 -m venv .venv
+py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
-python -m pip install -r requirements.txt
+python -m pip install --only-binary=:all: -r requirements.txt
 ```
 
 #### 3. 初始化配置
@@ -174,7 +177,7 @@ python src\main.py
 
 ### 卸载
 
-如果要移除自动部署或运行生成的内容，双击：
+如果要完全移除项目，双击：
 
 ```bat
 uninstall.bat
@@ -182,14 +185,13 @@ uninstall.bat
 
 它会删除：
 
+- 源码、README、脚本等项目文件
 - `.venv`
 - `models`
-- `config.yaml`
-- `corpus\corrections.json`
-- `corpus\blacklist.json`
-- `corpus\last_result.txt`
-- `run.bat`、`run_debug.bat`
-- 本地和桌面快捷方式
+- `run.bat`、`run_debug.bat`、快捷方式
+- 运行时生成内容
+
+卸载时可选择保留 `config.yaml`、`corpus\corrections.json`、`corpus\blacklist.json`。
 
 > 旧的 `scripts/download_models.sh` 和 `scripts/verify_asr.sh` 仍保留给 Git Bash / WSL / Linux 用户。普通 Windows 部署不需要安装 WSL，也不需要运行 `bash`。
 

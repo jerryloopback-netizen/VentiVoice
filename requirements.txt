@@ -1,5 +1,5 @@
 sounddevice>=0.4.6
-numpy>=1.24.0
+numpy>=1.24.0,<2.4
 pynput>=1.7.6
 pyperclip>=1.8.2
 pyyaml>=6.0
