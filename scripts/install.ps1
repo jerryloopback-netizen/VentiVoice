@@ -68,46 +68,135 @@ function Get-PythonInfo {
         [string]$Exe,
         [string[]]$Args = @()
     )
-    $output = & $Exe @Args -c "import sys; print('.'.join(map(str, sys.version_info[:3]))); print('64' if sys.maxsize > 2**32 else '32')" 2>$null
+    $output = & $Exe @Args -c "import sys; print('.'.join(map(str, sys.version_info[:3]))); print('64' if sys.maxsize > 2**32 else '32'); print(sys.executable)" 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $output) {
         return $null
     }
     $lines = @($output | ForEach-Object { [string]$_ })
-    if ($lines.Count -lt 2) {
+    if ($lines.Count -lt 3) {
         return $null
     }
     return [pscustomobject]@{
         Version = $lines[0].Trim()
         Is64Bit = $lines[1].Trim() -eq "64"
+        Path = $lines[2].Trim()
     }
 }
 
-function Get-PythonCommand {
-    $candidates = @(
-        @{ Exe = "py"; Args = @("-3.14-64") },
-        @{ Exe = "py"; Args = @("-3.13-64") },
-        @{ Exe = "py"; Args = @("-3.12-64") },
-        @{ Exe = "py"; Args = @("-3.11-64") },
-        @{ Exe = "python"; Args = @() }
+function New-PythonCandidate {
+    param(
+        [string]$Exe,
+        [string[]]$Args = @()
     )
 
+    return [pscustomobject]@{
+        Exe = $Exe
+        Args = $Args
+    }
+}
+
+function Get-PythonLauncherCandidates {
+    if (-not (Test-CommandExists "py")) {
+        return @()
+    }
+
+    $candidates = @()
+    $launcherOutput = & py -0p 2>$null
+    foreach ($line in @($launcherOutput)) {
+        $text = [string]$line
+        if ($text -match "-V:(3\.(11|12|13|14))\s+\*?\s*(.+python\.exe)\s*$") {
+            $version = $matches[1]
+            $path = $matches[3].Trim()
+            if (Test-Path -LiteralPath $path) {
+                $candidates += (New-PythonCandidate -Exe $path)
+            }
+            $candidates += (New-PythonCandidate -Exe "py" -Args @("-$version-64"))
+            $candidates += (New-PythonCandidate -Exe "py" -Args @("-$version"))
+        }
+    }
+
+    $candidates += (New-PythonCandidate -Exe "py" -Args @("-3.14-64"))
+    $candidates += (New-PythonCandidate -Exe "py" -Args @("-3.14"))
+    $candidates += (New-PythonCandidate -Exe "py" -Args @("-3.13-64"))
+    $candidates += (New-PythonCandidate -Exe "py" -Args @("-3.13"))
+    $candidates += (New-PythonCandidate -Exe "py" -Args @("-3.12-64"))
+    $candidates += (New-PythonCandidate -Exe "py" -Args @("-3.12"))
+    $candidates += (New-PythonCandidate -Exe "py" -Args @("-3.11-64"))
+    $candidates += (New-PythonCandidate -Exe "py" -Args @("-3.11"))
+
+    return $candidates
+}
+
+function Get-PythonCandidates {
+    $candidates = @()
+    $candidates += Get-PythonLauncherCandidates
+
+    if (Test-CommandExists "python") {
+        $candidates += (New-PythonCandidate -Exe "python")
+    }
+
+    $seen = @{}
+    $result = @()
     foreach ($candidate in $candidates) {
-        if (-not (Test-CommandExists $candidate.Exe)) {
+        $key = "$($candidate.Exe)|$($candidate.Args -join ' ')"
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $result += $candidate
+        }
+    }
+
+    return $result
+}
+
+function Get-PythonCommand {
+    $valid = @()
+    foreach ($candidate in (Get-PythonCandidates)) {
+        if (($candidate.Exe -notmatch "^[A-Za-z]:\\") -and (-not (Test-CommandExists $candidate.Exe))) {
             continue
         }
 
         $args = @($candidate.Args)
         $info = Get-PythonInfo -Exe $candidate.Exe -Args $args
         if ($info -and $info.Is64Bit -and (Test-SupportedPythonVersion $info.Version)) {
-            return [pscustomobject]@{
+            $valid += [pscustomobject]@{
                 Exe = $candidate.Exe
                 Args = $args
                 Version = $info.Version
+                VersionKey = [version]$info.Version
+                Path = $info.Path
             }
         }
     }
 
+    if ($valid.Count -gt 0) {
+        return ($valid | Sort-Object VersionKey -Descending | Select-Object -First 1)
+    }
+
     throw "未找到受支持的 64 位 Python 版本。请安装 64 位 Python 3.11-3.14；安装器会在本机 Python 3.11-3.14 中选择最高可用版本。"
+}
+
+function Test-VenvPipAvailable {
+    if (-not (Test-Path -LiteralPath $VenvPython)) {
+        return $false
+    }
+
+    & $VenvPython -m pip --version 2>$null | Out-Null
+    return $LASTEXITCODE -eq 0
+}
+
+function Repair-VenvPip {
+    if (Test-VenvPipAvailable) {
+        return $true
+    }
+
+    Write-Warn ".venv 中未检测到 pip，尝试用 ensurepip 修复。"
+    & $VenvPython -m ensurepip --upgrade
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    & $VenvPython -m pip install -U pip
+    return $LASTEXITCODE -eq 0
 }
 
 function Invoke-VenvPython {
@@ -596,12 +685,14 @@ function Test-PathInsideProject {
 }
 
 function Reset-VenvIfUnsupported {
+    param([string]$ExpectedVersion)
+
     if (-not (Test-Path -LiteralPath $VenvPython)) {
         return
     }
 
     $info = Get-PythonInfo -Exe $VenvPython
-    if ($info -and $info.Is64Bit -and (Test-SupportedPythonVersion $info.Version)) {
+    if ($info -and $info.Is64Bit -and (Test-SupportedPythonVersion $info.Version) -and ($info.Version -eq $ExpectedVersion)) {
         Write-Ok ".venv 已存在，Python $($info.Version)，复用当前环境"
         return
     }
@@ -614,6 +705,8 @@ function Reset-VenvIfUnsupported {
         Write-Warn ".venv 已存在但无法读取 Python 版本，将重建。"
     } elseif (-not $info.Is64Bit) {
         Write-Warn ".venv 使用 32 位 Python $($info.Version)，不支持当前二进制依赖，将重建。"
+    } elseif ($info.Version -ne $ExpectedVersion) {
+        Write-Warn ".venv 使用 Python $($info.Version)，与本次选择的 Python $ExpectedVersion 不一致，将重建。"
     } else {
         Write-Warn ".venv 使用 Python $($info.Version)，不在支持范围 3.11-3.14，将重建。"
     }
@@ -658,16 +751,32 @@ Write-Host "项目目录: $ProjectRoot"
 
 Write-Step "检查 Python"
 $Python = Get-PythonCommand
-Write-Ok "找到 Python $($Python.Version): $($Python.Exe) $($Python.Args -join ' ')"
+Write-Ok "找到 Python $($Python.Version): $($Python.Path)"
 
 Write-Step "创建虚拟环境"
-Reset-VenvIfUnsupported
+Reset-VenvIfUnsupported -ExpectedVersion $Python.Version
 if (-not (Test-Path -LiteralPath $VenvPython)) {
     & $Python.Exe @($Python.Args) -m venv $VenvDir
     if ($LASTEXITCODE -ne 0) {
         throw "创建虚拟环境失败。"
     }
     Write-Ok "已创建 .venv"
+}
+
+if (-not (Repair-VenvPip)) {
+    Write-Warn ".venv 的 pip 修复失败，将重建虚拟环境。"
+    if (-not (Test-PathInsideProject $VenvDir)) {
+        throw "拒绝删除项目目录外的虚拟环境: $VenvDir"
+    }
+    Remove-Item -LiteralPath $VenvDir -Recurse -Force
+    & $Python.Exe @($Python.Args) -m venv $VenvDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "重建虚拟环境失败。"
+    }
+    if (-not (Repair-VenvPip)) {
+        throw "虚拟环境 pip 不可用。请确认所选 Python 安装包含 ensurepip/pip。"
+    }
+    Write-Ok "已重建 .venv 并修复 pip"
 }
 
 Write-Step "检查 Windows 二进制运行库"
