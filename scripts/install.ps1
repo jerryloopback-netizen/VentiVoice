@@ -20,6 +20,7 @@ $ConfigPath = Join-Path $ProjectRoot "config.yaml"
 $ConfigExamplePath = Join-Path $ProjectRoot "config.yaml.example"
 $MinPython = [version]"3.11"
 $MaxPython = [version]"3.14"
+$VcRedistX64Url = "https://aka.ms/vc14/vc_redist.x64.exe"
 
 function Write-Step {
     param([string]$Message)
@@ -62,24 +63,31 @@ function Test-SupportedPythonVersion {
     }
 }
 
-function Get-PythonVersion {
+function Get-PythonInfo {
     param(
         [string]$Exe,
         [string[]]$Args = @()
     )
-    $version = & $Exe @Args -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    $output = & $Exe @Args -c "import sys; print('.'.join(map(str, sys.version_info[:3]))); print('64' if sys.maxsize > 2**32 else '32')" 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $output) {
         return $null
     }
-    return ($version | Select-Object -First 1).Trim()
+    $lines = @($output | ForEach-Object { [string]$_ })
+    if ($lines.Count -lt 2) {
+        return $null
+    }
+    return [pscustomobject]@{
+        Version = $lines[0].Trim()
+        Is64Bit = $lines[1].Trim() -eq "64"
+    }
 }
 
 function Get-PythonCommand {
     $candidates = @(
-        @{ Exe = "py"; Args = @("-3.14") },
-        @{ Exe = "py"; Args = @("-3.13") },
-        @{ Exe = "py"; Args = @("-3.12") },
-        @{ Exe = "py"; Args = @("-3.11") },
+        @{ Exe = "py"; Args = @("-3.14-64") },
+        @{ Exe = "py"; Args = @("-3.13-64") },
+        @{ Exe = "py"; Args = @("-3.12-64") },
+        @{ Exe = "py"; Args = @("-3.11-64") },
         @{ Exe = "python"; Args = @() }
     )
 
@@ -89,17 +97,17 @@ function Get-PythonCommand {
         }
 
         $args = @($candidate.Args)
-        $version = Get-PythonVersion -Exe $candidate.Exe -Args $args
-        if ($version -and (Test-SupportedPythonVersion $version)) {
+        $info = Get-PythonInfo -Exe $candidate.Exe -Args $args
+        if ($info -and $info.Is64Bit -and (Test-SupportedPythonVersion $info.Version)) {
             return [pscustomobject]@{
                 Exe = $candidate.Exe
                 Args = $args
-                Version = $version
+                Version = $info.Version
             }
         }
     }
 
-    throw "未找到受支持的 Python 版本。请安装 Python 3.14；安装器会在本机 Python 3.11-3.14 中选择最高可用版本。"
+    throw "未找到受支持的 64 位 Python 版本。请安装 64 位 Python 3.11-3.14；安装器会在本机 Python 3.11-3.14 中选择最高可用版本。"
 }
 
 function Invoke-VenvPython {
@@ -107,6 +115,208 @@ function Invoke-VenvPython {
     & $VenvPython @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "Python 命令执行失败: $VenvPython $($Arguments -join ' ')"
+    }
+}
+
+function Get-VcRedistX64Info {
+    $registryPaths = @(
+        "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+    )
+
+    foreach ($path in $registryPaths) {
+        try {
+            $item = Get-ItemProperty -LiteralPath $path -ErrorAction Stop
+            if ($item.Installed -eq 1) {
+                return [pscustomobject]@{
+                    Installed = $true
+                    Version = [string]$item.Version
+                    Path = $path
+                }
+            }
+        } catch {
+        }
+    }
+
+    return [pscustomobject]@{
+        Installed = $false
+        Version = ""
+        Path = ""
+    }
+}
+
+function Test-VcRuntimeDllsPresent {
+    $system32 = Join-Path $env:WINDIR "System32"
+    $dlls = @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+    foreach ($dll in $dlls) {
+        if (-not (Test-Path -LiteralPath (Join-Path $system32 $dll))) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Test-VcRedistX64Installed {
+    $info = Get-VcRedistX64Info
+    return $info.Installed -and (Test-VcRuntimeDllsPresent)
+}
+
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Install-VcRedistX64 {
+    Write-Warn "未检测到完整的 Microsoft Visual C++ 2015-2022 Redistributable (x64)。"
+    Write-Host "下载地址: $VcRedistX64Url"
+
+    $choice = Read-Host "是否现在自动下载安装 VC++ x64 运行库? [Y/n]"
+    if ($choice -match "^(n|N)$") {
+        Write-Warn "已跳过 VC++ 运行库安装。若后续出现 DLL load failed，请手动安装上面的官方链接。"
+        return $false
+    }
+
+    $installer = Join-Path ([System.IO.Path]::GetTempPath()) "vc_redist.x64.exe"
+    try {
+        Write-Host "正在下载 VC++ x64 运行库..."
+        Invoke-WebRequest -Uri $VcRedistX64Url -OutFile $installer -UseBasicParsing
+
+        Write-Host "正在安装 VC++ x64 运行库，可能会弹出 Windows 权限确认窗口..."
+        if (Test-IsAdministrator) {
+            $process = Start-Process -FilePath $installer -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
+        } else {
+            $process = Start-Process -FilePath $installer -ArgumentList "/install", "/quiet", "/norestart" -Verb RunAs -Wait -PassThru
+        }
+
+        if (($process.ExitCode -notin @(0, 3010)) -and (-not (Test-VcRedistX64Installed))) {
+            Write-Warn "VC++ 运行库安装程序退出码: $($process.ExitCode)"
+            Write-Warn "请手动下载安装: $VcRedistX64Url"
+            return $false
+        }
+
+        if ($process.ExitCode -eq 3010) {
+            Write-Warn "VC++ 运行库安装完成，但 Windows 提示需要重启。建议重启后再次运行 install.bat。"
+        } else {
+            Write-Ok "VC++ x64 运行库安装完成"
+        }
+        return $true
+    } catch {
+        Write-Warn "自动安装 VC++ 运行库失败: $($_.Exception.Message)"
+        Write-Warn "请手动下载安装: $VcRedistX64Url"
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Ensure-VcRedistX64 {
+    if (Test-VcRedistX64Installed) {
+        $info = Get-VcRedistX64Info
+        Write-Ok "已检测到 VC++ x64 运行库 $($info.Version)"
+        return
+    }
+
+    [void](Install-VcRedistX64)
+}
+
+function Test-PythonModuleImport {
+    param([string]$Module)
+
+    $code = @'
+import importlib
+import sys
+import traceback
+
+module = sys.argv[1]
+try:
+    importlib.import_module(module)
+except Exception:
+    traceback.print_exc()
+    sys.exit(1)
+'@
+
+    $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "ventivoice-test-import-$PID.py"
+    Write-Utf8NoBom -Path $tempScript -Content $code
+
+    try {
+        $output = & $VenvPython $tempScript $Module 2>&1
+        return [pscustomobject]@{
+            Success = ($LASTEXITCODE -eq 0)
+            Output = (($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine)
+        }
+    } finally {
+        Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-IsMissingPythonPackageError {
+    param([string]$Output)
+    return $Output -match "ModuleNotFoundError|No module named"
+}
+
+function Test-IsBinaryRuntimeError {
+    param([string]$Output)
+    return $Output -match "DLL load failed|LoadLibrary|cannot load library|specified module could not be found|找不到指定的模块|动态链接库|VCRUNTIME|MSVCP|vcruntime|msvcp|WinError 126|WinError 127|WinError 193"
+}
+
+function Test-CriticalDependencies {
+    $dependencies = @(
+        @{ Module = "sherpa_onnx"; Package = "sherpa-onnx"; Binary = $true; Hint = "ASR 推理运行时" },
+        @{ Module = "sounddevice"; Package = "sounddevice"; Binary = $true; Hint = "录音与 PortAudio" },
+        @{ Module = "numpy"; Package = "numpy"; Binary = $true; Hint = "音频数组处理" },
+        @{ Module = "PIL"; Package = "Pillow"; Binary = $true; Hint = "托盘图标处理" },
+        @{ Module = "yaml"; Package = "pyyaml"; Binary = $false; Hint = "配置文件读取" },
+        @{ Module = "httpx"; Package = "httpx"; Binary = $false; Hint = "LLM API 请求" },
+        @{ Module = "pynput"; Package = "pynput"; Binary = $false; Hint = "全局热键" },
+        @{ Module = "pyperclip"; Package = "pyperclip"; Binary = $false; Hint = "剪贴板" },
+        @{ Module = "pystray"; Package = "pystray"; Binary = $false; Hint = "系统托盘" },
+        @{ Module = "tkinter"; Package = ""; Binary = $false; Hint = "桌面界面，通常随官方 Python 安装" }
+    )
+
+    foreach ($dep in $dependencies) {
+        $result = Test-PythonModuleImport -Module $dep.Module
+        if ($result.Success) {
+            Write-Ok "$($dep.Module) ($($dep.Hint))"
+            continue
+        }
+
+        Write-Warn "$($dep.Module) 导入失败。"
+
+        if ((Test-IsMissingPythonPackageError $result.Output) -and $dep.Package) {
+            Write-Warn "检测到缺少 Python 包，正在自动补装: $($dep.Package)"
+            Invoke-VenvPython @("-m", "pip", "install", "--only-binary=:all:", $dep.Package)
+            $retry = Test-PythonModuleImport -Module $dep.Module
+            if ($retry.Success) {
+                Write-Ok "$($dep.Module) 已修复"
+                continue
+            }
+            $result = $retry
+        }
+
+        if ((Test-IsBinaryRuntimeError $result.Output) -or $dep.Binary) {
+            Write-Warn "这类错误通常与 Windows 二进制运行库或 DLL 加载有关。"
+            if (-not (Test-VcRedistX64Installed)) {
+                [void](Install-VcRedistX64)
+                $retryAfterVc = Test-PythonModuleImport -Module $dep.Module
+                if ($retryAfterVc.Success) {
+                    Write-Ok "$($dep.Module) 已在安装 VC++ 运行库后修复"
+                    continue
+                }
+                $result = $retryAfterVc
+            }
+        }
+
+        Write-Host ""
+        Write-Host "依赖导入失败: $($dep.Module)" -ForegroundColor Red
+        Write-Host "用途: $($dep.Hint)"
+        if ($dep.Package) {
+            Write-Host "Python 包: $($dep.Package)"
+        }
+        Write-Host "VC++ x64 运行库官方下载: $VcRedistX64Url"
+        Write-Host "原始错误:"
+        Write-Host $result.Output
+        throw "关键依赖验证失败: $($dep.Module)"
     }
 }
 
@@ -335,9 +545,9 @@ function Reset-VenvIfUnsupported {
         return
     }
 
-    $version = Get-PythonVersion -Exe $VenvPython
-    if ($version -and (Test-SupportedPythonVersion $version)) {
-        Write-Ok ".venv 已存在，Python $version，复用当前环境"
+    $info = Get-PythonInfo -Exe $VenvPython
+    if ($info -and $info.Is64Bit -and (Test-SupportedPythonVersion $info.Version)) {
+        Write-Ok ".venv 已存在，Python $($info.Version)，复用当前环境"
         return
     }
 
@@ -345,10 +555,12 @@ function Reset-VenvIfUnsupported {
         throw "拒绝删除项目目录外的虚拟环境: $VenvDir"
     }
 
-    if (-not $version) {
+    if (-not $info) {
         Write-Warn ".venv 已存在但无法读取 Python 版本，将重建。"
+    } elseif (-not $info.Is64Bit) {
+        Write-Warn ".venv 使用 32 位 Python $($info.Version)，不支持当前二进制依赖，将重建。"
     } else {
-        Write-Warn ".venv 使用 Python $version，不在支持范围 3.11-3.14，将重建。"
+        Write-Warn ".venv 使用 Python $($info.Version)，不在支持范围 3.11-3.14，将重建。"
     }
     Remove-Item -LiteralPath $VenvDir -Recurse -Force
 }
@@ -402,6 +614,9 @@ if (-not (Test-Path -LiteralPath $VenvPython)) {
     }
     Write-Ok "已创建 .venv"
 }
+
+Write-Step "检查 Windows 二进制运行库"
+Ensure-VcRedistX64
 
 Write-Step "安装 Python 依赖"
 Invoke-VenvPython @("-m", "pip", "install", "-U", "pip")
@@ -480,7 +695,7 @@ if (-not $SkipShortcut) {
 }
 
 Write-Step "验证关键依赖"
-Invoke-VenvPython @("-c", "import sherpa_onnx, sounddevice, pynput, pyperclip, yaml, httpx; print('依赖导入成功')")
+Test-CriticalDependencies
 
 Write-Host ""
 Write-Ok "安装完成。"
