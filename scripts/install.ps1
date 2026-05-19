@@ -68,7 +68,7 @@ function Get-PythonInfo {
         [string]$Exe,
         [string[]]$Args = @()
     )
-    $output = & $Exe @Args -c "import sys; print('.'.join(map(str, sys.version_info[:3]))); print('64' if sys.maxsize > 2**32 else '32'); print(sys.executable)" 2>$null
+    $output = & $Exe @($Args) -c "import sys; print('.'.join(map(str, sys.version_info[:3]))); print('64' if sys.maxsize > 2**32 else '32'); print(sys.executable)" 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $output) {
         return $null
     }
