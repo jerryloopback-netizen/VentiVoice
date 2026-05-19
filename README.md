@@ -157,7 +157,7 @@ Copy-Item config.yaml.example config.yaml
 
 也可以启动程序后在界面内管理 LLM 配置。这里，推荐OpenAI的gpt-5.4-mini，具有高速响应和不错的智能。这个模型的API在不少第三方转发站点成本几乎没有。
 
-若没有第三方OpenAI compatable API申请经历，可以尝试 coderelay.cn 的 gpt-5.4-mini。仅作参考不做任何推荐。
+若没有第三方OpenAI compatible API申请经历，可以尝试 coderelay.cn 的 gpt-5.4-mini。仅作参考不做任何推荐。
 
 ### 5. 验证 ASR（可选）
 
