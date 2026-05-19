@@ -237,16 +237,62 @@ except Exception:
 '@
 
     $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "ventivoice-test-import-$PID.py"
+    $stdoutFile = Join-Path ([System.IO.Path]::GetTempPath()) "ventivoice-test-import-$PID.out.txt"
+    $stderrFile = Join-Path ([System.IO.Path]::GetTempPath()) "ventivoice-test-import-$PID.err.txt"
     Write-Utf8NoBom -Path $tempScript -Content $code
 
     try {
-        $output = & $VenvPython $tempScript $Module 2>&1
+        Remove-Item -LiteralPath $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+        $process = Start-Process -FilePath $VenvPython -ArgumentList @("-X", "faulthandler", $tempScript, $Module) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+        $stdout = if (Test-Path -LiteralPath $stdoutFile) { Get-Content -LiteralPath $stdoutFile -Raw -ErrorAction SilentlyContinue } else { "" }
+        $stderr = if (Test-Path -LiteralPath $stderrFile) { Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue } else { "" }
         return [pscustomobject]@{
-            Success = ($LASTEXITCODE -eq 0)
-            Output = (($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine)
+            Success = ($process.ExitCode -eq 0)
+            ExitCode = $process.ExitCode
+            Output = (@($stdout, $stderr) -join [Environment]::NewLine).Trim()
         }
     } finally {
         Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-CommonOnnxRuntimeDllLocations {
+    $candidates = @()
+    $candidates += @(
+        (Join-Path $env:SystemDrive "onnxruntime.dll"),
+        (Join-Path $env:SystemDrive "Windows\System32\onnxruntime.dll"),
+        (Join-Path $ProjectRoot "onnxruntime.dll")
+    )
+    if (${env:ProgramFiles}) {
+        $candidates += (Join-Path ${env:ProgramFiles} "onnxruntime.dll")
+    }
+    if (${env:ProgramFiles(x86)}) {
+        $candidates += (Join-Path ${env:ProgramFiles(x86)} "onnxruntime.dll")
+    }
+
+    $found = @()
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            $found += (Get-Item -LiteralPath $candidate).FullName
+        }
+    }
+
+    return $found
+}
+
+function Show-SherpaOnnxHints {
+    $matches = Get-CommonOnnxRuntimeDllLocations
+    if ($matches.Count -gt 0) {
+        Write-Warn "检测到可能冲突的 onnxruntime.dll："
+        foreach ($path in $matches) {
+            Write-Host "  $path"
+        }
+        Write-Warn "sherpa-onnx 官方 FAQ 提到，C 盘上的旧版 onnxruntime.dll 可能会导致导入异常。"
+        Write-Warn "如果你确认这些 DLL 不是别的程序必需的，请先移走或重命名这些旧文件，再重新运行 install.bat。"
+    } else {
+        Write-Warn "未在常见位置找到明显的 onnxruntime.dll 冲突文件。"
+        Write-Warn "如果 sherpa_onnx 仍然失败，请检查是否有其他程序把旧版 onnxruntime.dll 放进了 PATH 或 C 盘根目录。"
     }
 }
 
@@ -307,15 +353,24 @@ function Test-CriticalDependencies {
             }
         }
 
+        if ($dep.Module -eq "sherpa_onnx") {
+            Show-SherpaOnnxHints
+        }
+
         Write-Host ""
         Write-Host "依赖导入失败: $($dep.Module)" -ForegroundColor Red
         Write-Host "用途: $($dep.Hint)"
         if ($dep.Package) {
             Write-Host "Python 包: $($dep.Package)"
         }
+        Write-Host "退出码: $($result.ExitCode)"
         Write-Host "VC++ x64 运行库官方下载: $VcRedistX64Url"
         Write-Host "原始错误:"
-        Write-Host $result.Output
+        if ($result.Output) {
+            Write-Host $result.Output
+        } else {
+            Write-Host "(无额外输出)"
+        }
         throw "关键依赖验证失败: $($dep.Module)"
     }
 }
