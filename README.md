@@ -82,7 +82,7 @@ VentiVoice 是一个 Windows 桌面语音转写工具，将本地 ASR 识别与 
 
 ### 环境要求
 
-- Python 3.11-3.14 (，3.15及以上缺少部分 wheel 预编译库)
+- Python 3.11-3.14 (3.15及以上缺少部分 wheel 预编译库)
 - Windows 10/11 , x64
 - 麦克风
 
