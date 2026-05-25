@@ -14,7 +14,7 @@ import subprocess
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog
 from pathlib import Path
 from typing import Optional
 
@@ -29,6 +29,7 @@ from asr import build_engine, ASREngine
 from llm import LLMProcessor, Tier
 from recorder import Recorder
 from corpus import Corpus
+from file_loader import load_audio_file, get_audio_duration_seconds
 
 
 class VentiVoiceApp:
@@ -148,6 +149,56 @@ class VentiVoiceApp:
         self._set_status("转写中...")
         threading.Thread(target=self._process_audio, args=(audio,), daemon=True).start()
 
+    def _import_audio_file(self):
+        if self._processing:
+            self._set_status("正在处理中，请稍候")
+            return
+
+        file_path = filedialog.askopenfilename(
+            title="选择音频文件",
+            filetypes=[
+                ("音频文件", "*.mp3 *.wav *.flac *.ogg *.m4a *.wma *.aac *.opus"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not file_path:
+            return
+
+        tier_text = self._import_tier_var.get()
+        tier: Tier = int(tier_text[0])
+        self._current_tier = tier
+
+        duration = get_audio_duration_seconds(file_path)
+        if duration > 120:
+            proceed = messagebox.askyesno(
+                "长音频确认",
+                f"该音频时长约 {duration:.0f} 秒（{duration/60:.1f} 分钟）。\n"
+                "较长的音频可能需要更多处理时间。是否继续？",
+            )
+            if not proceed:
+                return
+
+        self._set_status(f"加载音频文件: {Path(file_path).name}...")
+        threading.Thread(target=self._do_import_audio, args=(file_path,), daemon=True).start()
+
+    def _do_import_audio(self, file_path: str):
+        try:
+            audio = load_audio_file(file_path, target_sr=self.config["recording"]["sample_rate"])
+
+            if len(audio) < 1600:
+                self._set_status("音频文件太短，已忽略")
+                return
+
+            self._processing = True
+            self._set_status(f"转写中... ({Path(file_path).name})")
+            self._process_audio(audio)
+        except FileNotFoundError as e:
+            self._set_status(f"文件不存在: {e}")
+        except RuntimeError as e:
+            self._set_status(f"加载失败: {e}")
+        except Exception as e:
+            self._set_status(f"导入错误: {e}")
+
     def _process_audio(self, audio):
         try:
             if not self._engine:
@@ -259,6 +310,24 @@ class VentiVoiceApp:
         self._corpus_btn = ttk.Button(llm_row, text="个人词库", width=8,
                                       command=self._toggle_corpus_panel)
         self._corpus_btn.pack(side=tk.LEFT, padx=(4, 0))
+
+        # 文件导入行
+        import_row = ttk.Frame(main, style="Dark.TFrame")
+        import_row.pack(fill=tk.X, pady=(0, 6))
+
+        ttk.Label(import_row, text="文件导入:", style="Dark.TLabel").pack(side=tk.LEFT)
+
+        self._import_btn = ttk.Button(import_row, text="选择音频文件", width=12,
+                                      command=self._import_audio_file)
+        self._import_btn.pack(side=tk.LEFT, padx=(4, 8))
+
+        ttk.Label(import_row, text="档位:", style="Dark.TLabel").pack(side=tk.LEFT)
+        self._import_tier_var = tk.StringVar(value="1")
+        import_tier_combo = ttk.Combobox(import_row, textvariable=self._import_tier_var,
+                                         values=["1 - Clean", "2 - Refine", "3 - Rewrite"],
+                                         state="readonly", width=12)
+        import_tier_combo.pack(side=tk.LEFT, padx=(4, 0))
+        import_tier_combo.current(0)
 
         # LLM 设置子面板 (默认隐藏)
         self._llm_panel = ttk.LabelFrame(main, text="LLM 配置编辑", style="Dark.TLabelframe", padding=4)

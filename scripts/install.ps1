@@ -401,6 +401,8 @@ function Test-CriticalDependencies {
         @{ Module = "sounddevice"; Package = "sounddevice"; Binary = $true; Hint = "录音与 PortAudio" },
         @{ Module = "numpy"; Package = "numpy"; Binary = $true; Hint = "音频数组处理" },
         @{ Module = "PIL"; Package = "Pillow"; Binary = $true; Hint = "托盘图标处理" },
+        @{ Module = "pydub"; Package = "pydub"; Binary = $false; Hint = "音频文件格式转换" },
+        @{ Module = "audioop"; Package = "audioop-lts"; Binary = $false; Hint = "pydub 音频处理依赖 (Python 3.13+)" },
         @{ Module = "yaml"; Package = "pyyaml"; Binary = $false; Hint = "配置文件读取" },
         @{ Module = "httpx"; Package = "httpx"; Binary = $false; Hint = "LLM API 请求" },
         @{ Module = "pynput"; Package = "pynput"; Binary = $false; Hint = "全局热键" },
@@ -841,6 +843,59 @@ if (-not $SkipModelDownload) {
                 Invoke-VenvPython @((Join-Path $ProjectRoot "scripts\download_models.py"), "--model", "sensevoice-small", "--source", $source)
             }
         }
+    }
+}
+
+Write-Step "检查 ffmpeg（音频文件导入所需）"
+$FfmpegToolsDir = Join-Path $ProjectRoot "tools"
+$FfmpegToolsExe = Join-Path $FfmpegToolsDir "ffmpeg.exe"
+$FfmpegAvailable = $false
+
+if (Test-CommandExists "ffmpeg") {
+    Write-Ok "已检测到系统 PATH 中的 ffmpeg"
+    $FfmpegAvailable = $true
+} elseif (Test-Path -LiteralPath $FfmpegToolsExe) {
+    Write-Ok "已检测到项目 tools\ffmpeg.exe"
+    $FfmpegAvailable = $true
+}
+
+if (-not $FfmpegAvailable) {
+    Write-Warn "未检测到 ffmpeg。音频文件导入功能（.mp3/.m4a/.ogg 等格式）需要 ffmpeg。"
+    Write-Host "  纯 .wav 文件导入不受影响。"
+    $ffmpegChoice = Read-Host "是否自动下载 ffmpeg 到项目 tools\ 目录? [Y/n]"
+    if ($ffmpegChoice -notmatch "^(n|N)$") {
+        New-Item -ItemType Directory -Path $FfmpegToolsDir -Force | Out-Null
+        $FfmpegZipUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+        $FfmpegZipPath = Join-Path ([System.IO.Path]::GetTempPath()) "ffmpeg-essentials-$PID.zip"
+        $FfmpegExtractDir = Join-Path ([System.IO.Path]::GetTempPath()) "ffmpeg-extract-$PID"
+
+        try {
+            Write-Host "正在下载 ffmpeg（约 80MB）..."
+            Invoke-WebRequest -Uri $FfmpegZipUrl -OutFile $FfmpegZipPath -UseBasicParsing
+            Write-Host "正在解压..."
+            Expand-Archive -LiteralPath $FfmpegZipPath -DestinationPath $FfmpegExtractDir -Force
+
+            $ffmpegExeFound = Get-ChildItem -Path $FfmpegExtractDir -Recurse -Filter "ffmpeg.exe" |
+                Where-Object { $_.DirectoryName -match "bin" } |
+                Select-Object -First 1
+
+            if ($ffmpegExeFound) {
+                Copy-Item -LiteralPath $ffmpegExeFound.FullName -Destination $FfmpegToolsExe -Force
+                Write-Ok "ffmpeg 已下载到 tools\ffmpeg.exe"
+            } else {
+                Write-Warn "解压后未找到 ffmpeg.exe，请手动下载 ffmpeg 并放入 tools\ 目录。"
+            }
+        } catch {
+            Write-Warn "ffmpeg 下载失败: $($_.Exception.Message)"
+            Write-Warn "请手动下载 ffmpeg 并将 ffmpeg.exe 放入项目 tools\ 目录。"
+            Write-Host "  下载地址: https://www.gyan.dev/ffmpeg/builds/"
+        } finally {
+            Remove-Item -LiteralPath $FfmpegZipPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $FfmpegExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } else {
+        Write-Warn "跳过 ffmpeg 安装。文件导入功能可能无法处理 mp3/m4a/ogg 等格式。"
+        Write-Host "  你可以之后手动将 ffmpeg.exe 放入项目 tools\ 目录，或安装 ffmpeg 到系统 PATH。"
     }
 }
 

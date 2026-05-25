@@ -33,3 +33,4 @@ Thumbs.db
 .DS_Store
 ventiVoice-v1.1.2-source.zip
 *.zip
+tools/ffmpeg.exe
